@@ -5,7 +5,7 @@
 	objectVersion = 56;
 	objects = {
 		A00000000000000000000001 = {isa = PBXGroup; children = (A00000000000000000000002, A00000000000000000000003); sourceTree = "<group>";};
-		A00000000000000000000002 = {isa = PBXGroup; children = (A10000000000000000000001, A10000000000000000000002, A10000000000000000000003, A10000000000000000000004, A10000000000000000000005, A10000000000000000000006, A10000000000000000000007); path = MacIntervalRecorder; sourceTree = "<group>";};
+		A00000000000000000000002 = {isa = PBXGroup; children = (A10000000000000000000001, A10000000000000000000002, A10000000000000000000003, A10000000000000000000004, A10000000000000000000005, A10000000000000000000006, A10000000000000000000007, A10000000000000000000008); path = MacIntervalRecorder; sourceTree = "<group>";};
 		A00000000000000000000003 = {isa = PBXGroup; children = (A30000000000000000000001); name = Products; sourceTree = "<group>";};
 		A10000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacIntervalRecorderApp.swift; sourceTree = "<group>";};
 		A10000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>";};
@@ -14,6 +14,7 @@
 		A10000000000000000000005 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecorderController.swift; sourceTree = "<group>";};
 		A10000000000000000000006 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoMerger.swift; sourceTree = "<group>";};
 		A10000000000000000000007 = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>";};
+		A10000000000000000000008 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovementDetector.swift; sourceTree = "<group>";};
 		A30000000000000000000001 = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MacIntervalRecorder.app; sourceTree = BUILT_PRODUCTS_DIR;};
 		A20000000000000000000001 = {isa = PBXBuildFile; fileRef = A10000000000000000000001;};
 		A20000000000000000000002 = {isa = PBXBuildFile; fileRef = A10000000000000000000002;};
@@ -21,7 +22,8 @@
 		A20000000000000000000004 = {isa = PBXBuildFile; fileRef = A10000000000000000000004;};
 		A20000000000000000000005 = {isa = PBXBuildFile; fileRef = A10000000000000000000005;};
 		A20000000000000000000006 = {isa = PBXBuildFile; fileRef = A10000000000000000000006;};
-		A40000000000000000000001 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A20000000000000000000001, A20000000000000000000002, A20000000000000000000003, A20000000000000000000004, A20000000000000000000005, A20000000000000000000006); runOnlyForDeploymentPostprocessing = 0;};
+		A20000000000000000000008 = {isa = PBXBuildFile; fileRef = A10000000000000000000008;};
+		A40000000000000000000001 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A20000000000000000000001, A20000000000000000000002, A20000000000000000000003, A20000000000000000000004, A20000000000000000000005, A20000000000000000000006, A20000000000000000000008); runOnlyForDeploymentPostprocessing = 0;};
 		A40000000000000000000002 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;};
 		A40000000000000000000003 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;};
 		A50000000000000000000001 = {isa = PBXNativeTarget; buildConfigurationList = A70000000000000000000002; buildPhases = (A40000000000000000000001, A40000000000000000000002, A40000000000000000000003); buildRules = (); dependencies = (); name = MacIntervalRecorder; productName = MacIntervalRecorder; productReference = A30000000000000000000001; productType = "com.apple.product-type.application";};
