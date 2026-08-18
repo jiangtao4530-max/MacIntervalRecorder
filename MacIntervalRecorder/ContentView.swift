@@ -84,6 +84,10 @@ struct ContentView: View {
                 }
                 Spacer()
 
+                Label("均衡压缩：720p HEVC", systemImage: "arrow.down.right.and.arrow.up.left")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 if recorder.isExporting {
                     ProgressView()
                         .controlSize(.small)
