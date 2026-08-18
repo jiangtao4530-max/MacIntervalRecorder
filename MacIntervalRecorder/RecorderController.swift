@@ -273,7 +273,7 @@ final class RecorderController: NSObject, ObservableObject {
         }
 
         isExporting = true
-        statusText = "正在合并 \(clipURLs.count) 个片段…"
+        statusText = "正在合并并压缩 \(clipURLs.count) 个片段…"
         if FileManager.default.fileExists(atPath: destination.path) {
             try? FileManager.default.removeItem(at: destination)
         }
