@@ -44,18 +44,24 @@ struct ContentView: View {
                     .disabled(recorder.isRunning)
             }
 
-            if recorder.recordingMode == .interval {
+            if recorder.recordingMode != .humanMovement {
                 HStack(spacing: 24) {
                     Stepper(value: $recorder.intervalMinutes, in: 1...120) {
-                        Text("间隔：\(recorder.intervalMinutes) 分钟")
+                        Text(recorder.recordingMode == .smartHybrid
+                            ? "保底周期：\(recorder.intervalMinutes) 分钟"
+                            : "间隔：\(recorder.intervalMinutes) 分钟")
                     }
                     Stepper(value: $recorder.clipSeconds, in: 1...60) {
-                        Text("片段：\(recorder.clipSeconds) 秒")
+                        Text(recorder.recordingMode == .smartHybrid
+                            ? "保底片段：\(recorder.clipSeconds) 秒"
+                            : "片段：\(recorder.clipSeconds) 秒")
                     }
                     Spacer()
                 }
                 .disabled(recorder.isRunning)
-            } else {
+            }
+
+            if recorder.recordingMode != .interval {
                 HStack(spacing: 24) {
                     VStack(alignment: .leading) {
                         Text("走动灵敏度")
