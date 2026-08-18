@@ -3,6 +3,7 @@ import AppKit
 import IOKit.pwr_mgt
 
 enum RecordingMode: String, CaseIterable, Identifiable {
+    case smartHybrid = "智能混合"
     case interval = "定时录制"
     case humanMovement = "人体走动检测"
 
@@ -20,7 +21,7 @@ final class RecorderController: NSObject, ObservableObject {
     }
     @Published var intervalMinutes = 5
     @Published var clipSeconds = 5
-    @Published var recordingMode: RecordingMode = .interval
+    @Published var recordingMode: RecordingMode = .smartHybrid
     @Published var movementSensitivity = 0.035
     @Published var inactivitySeconds = 10
     @Published var includeAudio = true
@@ -44,6 +45,7 @@ final class RecorderController: NSObject, ObservableObject {
     private var hasPowerAssertion = false
     private var sessionConfigured = false
     private var lastMovementAt: Date?
+    private var motionTriggeredInCurrentWindow = false
 
     override init() {
         super.init()
@@ -94,12 +96,17 @@ final class RecorderController: NSObject, ObservableObject {
         }
 
         isRunning = true
-        statusText = recordingMode == .interval ? "定时录制已开始" : "正在等待有人走动…"
+        switch recordingMode {
+        case .smartHybrid: statusText = "智能混合已开始，正在监测本周期…"
+        case .interval: statusText = "定时录制已开始"
+        case .humanMovement: statusText = "正在等待有人走动…"
+        }
         acquirePowerAssertion()
 
         scheduleTask = Task { [weak self] in
             guard let self else { return }
-            if self.recordingMode == .interval {
+            switch self.recordingMode {
+            case .interval:
                 while !Task.isCancelled {
                     await self.recordOneTimedClip()
                     if Task.isCancelled { break }
@@ -107,14 +114,10 @@ final class RecorderController: NSObject, ObservableObject {
                     let delay = UInt64(self.intervalMinutes) * 60 * 1_000_000_000
                     try? await Task.sleep(nanoseconds: delay)
                 }
-            } else {
-                self.movementDetector.movementThreshold = self.movementSensitivity
-                self.movementDetector.reset()
-                self.movementDetector.isEnabled = true
-                while !Task.isCancelled {
-                    self.stopMotionClipIfInactive()
-                    try? await Task.sleep(nanoseconds: 250_000_000)
-                }
+            case .humanMovement:
+                await self.runMovementLoop(withTimedFallback: false)
+            case .smartHybrid:
+                await self.runMovementLoop(withTimedFallback: true)
             }
         }
     }
@@ -125,6 +128,7 @@ final class RecorderController: NSObject, ObservableObject {
         movementDetector.isEnabled = false
         movementDetector.reset()
         humanDetected = false
+        motionTriggeredInCurrentWindow = false
         if movieOutput.isRecording {
             movieOutput.stopRecording()
             while isRecordingClip {
@@ -207,16 +211,53 @@ final class RecorderController: NSObject, ObservableObject {
         }
     }
 
-    private func recordOneTimedClip() async {
+    private func recordOneTimedClip(isFallback: Bool = false) async {
         guard isRunning, !movieOutput.isRecording else { return }
-        startClip(status: "正在录制 \(clipSeconds) 秒…")
-        statusText = "正在录制 \(clipSeconds) 秒…"
+        let message = isFallback
+            ? "本周期无人活动，正在补录 \(clipSeconds) 秒…"
+            : "正在录制 \(clipSeconds) 秒…"
+        startClip(status: message)
 
         do {
             try await Task.sleep(nanoseconds: UInt64(clipSeconds) * 1_000_000_000)
         } catch { }
+        // If a person starts moving during a fallback clip, keep recording and
+        // let the inactivity timer decide when that activity clip should end.
+        if isFallback,
+           recordingMode == .smartHybrid,
+           motionTriggeredInCurrentWindow {
+            statusText = "补录期间检测到活动，继续录像…"
+            return
+        }
         if movieOutput.isRecording { movieOutput.stopRecording() }
         await waitForCurrentRecording()
+    }
+
+    private func runMovementLoop(withTimedFallback: Bool) async {
+        movementDetector.movementThreshold = movementSensitivity
+        movementDetector.reset()
+        movementDetector.isEnabled = true
+        motionTriggeredInCurrentWindow = false
+        var windowDeadline = Date().addingTimeInterval(Double(intervalMinutes * 60))
+
+        while !Task.isCancelled {
+            stopMotionClipIfInactive()
+
+            if withTimedFallback, Date() >= windowDeadline {
+                if !motionTriggeredInCurrentWindow, !movieOutput.isRecording {
+                    await recordOneTimedClip(isFallback: true)
+                }
+                // A recording spanning the boundary counts as activity in the
+                // new window, preventing a redundant fallback clip.
+                motionTriggeredInCurrentWindow = movieOutput.isRecording
+                windowDeadline = Date().addingTimeInterval(Double(intervalMinutes * 60))
+                if !movieOutput.isRecording {
+                    statusText = "新周期开始，正在监测人体活动…"
+                }
+            }
+
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
     }
 
     private func startClip(status: String) {
@@ -231,10 +272,11 @@ final class RecorderController: NSObject, ObservableObject {
     }
 
     private func handleDetection(personPresent: Bool, movementDetected: Bool) {
-        guard isRunning, recordingMode == .humanMovement else { return }
+        guard isRunning, recordingMode != .interval else { return }
         humanDetected = personPresent
         if movementDetected {
             lastMovementAt = Date()
+            motionTriggeredInCurrentWindow = true
             if !movieOutput.isRecording {
                 startClip(status: "检测到有人走动，正在录制…")
             } else {
@@ -246,7 +288,7 @@ final class RecorderController: NSObject, ObservableObject {
     }
 
     private func stopMotionClipIfInactive() {
-        guard recordingMode == .humanMovement,
+        guard recordingMode != .interval,
               movieOutput.isRecording,
               let lastMovementAt,
               Date().timeIntervalSince(lastMovementAt) >= Double(inactivitySeconds) else { return }
@@ -333,8 +375,10 @@ extension RecorderController: AVCaptureFileOutputRecordingDelegate {
             self.isRecordingClip = false
             self.recordingContinuation?.resume()
             self.recordingContinuation = nil
-            if self.isRunning, self.recordingMode == .humanMovement {
-                self.statusText = "正在等待有人走动…"
+            if self.isRunning, self.recordingMode != .interval {
+                self.statusText = self.recordingMode == .smartHybrid
+                    ? "正在监测本周期的人体活动…"
+                    : "正在等待有人走动…"
             }
         }
     }
