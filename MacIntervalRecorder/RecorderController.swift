@@ -2,6 +2,13 @@
 import AppKit
 import IOKit.pwr_mgt
 
+enum RecordingMode: String, CaseIterable, Identifiable {
+    case interval = "定时录制"
+    case humanMovement = "人体走动检测"
+
+    var id: Self { self }
+}
+
 @MainActor
 final class RecorderController: NSObject, ObservableObject {
     @Published var cameras: [AVCaptureDevice] = []
@@ -13,22 +20,39 @@ final class RecorderController: NSObject, ObservableObject {
     }
     @Published var intervalMinutes = 5
     @Published var clipSeconds = 5
+    @Published var recordingMode: RecordingMode = .interval
+    @Published var movementSensitivity = 0.035
+    @Published var inactivitySeconds = 10
     @Published var includeAudio = true
     @Published private(set) var isRunning = false
     @Published private(set) var isRecordingClip = false
     @Published private(set) var isExporting = false
     @Published private(set) var clipCount = 0
+    @Published private(set) var humanDetected = false
     @Published private(set) var statusText = "正在准备摄像头…"
     @Published var errorMessage: String?
 
     let session = AVCaptureSession()
     private let movieOutput = AVCaptureMovieFileOutput()
+    private let videoDataOutput = AVCaptureVideoDataOutput()
+    private let movementDetector = MovementDetector()
+    private let analysisQueue = DispatchQueue(label: "MacIntervalRecorder.human-detection", qos: .userInitiated)
     private var clipURLs: [URL] = []
     private var scheduleTask: Task<Void, Never>?
     private var recordingContinuation: CheckedContinuation<Void, Never>?
     private var powerAssertionID: IOPMAssertionID = 0
     private var hasPowerAssertion = false
     private var sessionConfigured = false
+    private var lastMovementAt: Date?
+
+    override init() {
+        super.init()
+        movementDetector.onResult = { [weak self] personPresent, movementDetected in
+            Task { @MainActor in
+                self?.handleDetection(personPresent: personPresent, movementDetected: movementDetected)
+            }
+        }
+    }
 
     func prepare() async {
         let videoAllowed = await requestAccess(for: .video)
@@ -70,17 +94,27 @@ final class RecorderController: NSObject, ObservableObject {
         }
 
         isRunning = true
-        statusText = "录制计划已开始"
+        statusText = recordingMode == .interval ? "定时录制已开始" : "正在等待有人走动…"
         acquirePowerAssertion()
 
         scheduleTask = Task { [weak self] in
             guard let self else { return }
-            while !Task.isCancelled {
-                await self.recordOneClip()
-                if Task.isCancelled { break }
-                self.statusText = "等待下一次录制…"
-                let delay = UInt64(self.intervalMinutes) * 60 * 1_000_000_000
-                try? await Task.sleep(nanoseconds: delay)
+            if self.recordingMode == .interval {
+                while !Task.isCancelled {
+                    await self.recordOneTimedClip()
+                    if Task.isCancelled { break }
+                    self.statusText = "等待下一次录制…"
+                    let delay = UInt64(self.intervalMinutes) * 60 * 1_000_000_000
+                    try? await Task.sleep(nanoseconds: delay)
+                }
+            } else {
+                self.movementDetector.movementThreshold = self.movementSensitivity
+                self.movementDetector.reset()
+                self.movementDetector.isEnabled = true
+                while !Task.isCancelled {
+                    self.stopMotionClipIfInactive()
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                }
             }
         }
     }
@@ -88,6 +122,9 @@ final class RecorderController: NSObject, ObservableObject {
     func stopAndExport() async {
         scheduleTask?.cancel()
         scheduleTask = nil
+        movementDetector.isEnabled = false
+        movementDetector.reset()
+        humanDetected = false
         if movieOutput.isRecording {
             movieOutput.stopRecording()
             while isRecordingClip {
@@ -114,6 +151,7 @@ final class RecorderController: NSObject, ObservableObject {
 
     func shutdown() {
         scheduleTask?.cancel()
+        movementDetector.isEnabled = false
         if movieOutput.isRecording { movieOutput.stopRecording() }
         releasePowerAssertion()
         session.stopRunning()
@@ -150,6 +188,14 @@ final class RecorderController: NSObject, ObservableObject {
             if !session.outputs.contains(movieOutput), session.canAddOutput(movieOutput) {
                 session.addOutput(movieOutput)
             }
+            if !session.outputs.contains(videoDataOutput), session.canAddOutput(videoDataOutput) {
+                videoDataOutput.alwaysDiscardsLateVideoFrames = true
+                videoDataOutput.videoSettings = [
+                    kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+                ]
+                videoDataOutput.setSampleBufferDelegate(movementDetector, queue: analysisQueue)
+                session.addOutput(videoDataOutput)
+            }
             session.commitConfiguration()
             sessionConfigured = true
             if !session.isRunning { session.startRunning() }
@@ -161,22 +207,52 @@ final class RecorderController: NSObject, ObservableObject {
         }
     }
 
-    private func recordOneClip() async {
+    private func recordOneTimedClip() async {
         guard isRunning, !movieOutput.isRecording else { return }
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("MacIntervalRecorder", isDirectory: true)
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let url = directory.appendingPathComponent("clip-\(UUID().uuidString).mov")
-
-        isRecordingClip = true
+        startClip(status: "正在录制 \(clipSeconds) 秒…")
         statusText = "正在录制 \(clipSeconds) 秒…"
-        movieOutput.startRecording(to: url, recordingDelegate: self)
 
         do {
             try await Task.sleep(nanoseconds: UInt64(clipSeconds) * 1_000_000_000)
         } catch { }
         if movieOutput.isRecording { movieOutput.stopRecording() }
         await waitForCurrentRecording()
+    }
+
+    private func startClip(status: String) {
+        guard isRunning, !movieOutput.isRecording else { return }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MacIntervalRecorder", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("clip-\(UUID().uuidString).mov")
+        isRecordingClip = true
+        statusText = status
+        movieOutput.startRecording(to: url, recordingDelegate: self)
+    }
+
+    private func handleDetection(personPresent: Bool, movementDetected: Bool) {
+        guard isRunning, recordingMode == .humanMovement else { return }
+        humanDetected = personPresent
+        if movementDetected {
+            lastMovementAt = Date()
+            if !movieOutput.isRecording {
+                startClip(status: "检测到有人走动，正在录制…")
+            } else {
+                statusText = "检测到持续活动，正在录制…"
+            }
+        } else if !movieOutput.isRecording {
+            statusText = personPresent ? "检测到人，等待走动…" : "正在等待有人走动…"
+        }
+    }
+
+    private func stopMotionClipIfInactive() {
+        guard recordingMode == .humanMovement,
+              movieOutput.isRecording,
+              let lastMovementAt,
+              Date().timeIntervalSince(lastMovementAt) >= Double(inactivitySeconds) else { return }
+        statusText = "活动停止，正在保存片段…"
+        movieOutput.stopRecording()
+        self.lastMovementAt = nil
     }
 
     private func waitForCurrentRecording() async {
@@ -257,6 +333,9 @@ extension RecorderController: AVCaptureFileOutputRecordingDelegate {
             self.isRecordingClip = false
             self.recordingContinuation?.resume()
             self.recordingContinuation = nil
+            if self.isRunning, self.recordingMode == .humanMovement {
+                self.statusText = "正在等待有人走动…"
+            }
         }
     }
 }
