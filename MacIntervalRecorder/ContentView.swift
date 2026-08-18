@@ -33,18 +33,46 @@ struct ContentView: View {
                 .frame(maxWidth: 300)
                 .disabled(recorder.isRunning)
 
-                Stepper(value: $recorder.intervalMinutes, in: 1...120) {
-                    Text("间隔：\(recorder.intervalMinutes) 分钟")
-                }
-                .disabled(recorder.isRunning)
-
-                Stepper(value: $recorder.clipSeconds, in: 1...60) {
-                    Text("片段：\(recorder.clipSeconds) 秒")
+                Picker("模式", selection: $recorder.recordingMode) {
+                    ForEach(RecordingMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
                 }
                 .disabled(recorder.isRunning)
 
                 Toggle("录制声音", isOn: $recorder.includeAudio)
                     .disabled(recorder.isRunning)
+            }
+
+            if recorder.recordingMode == .interval {
+                HStack(spacing: 24) {
+                    Stepper(value: $recorder.intervalMinutes, in: 1...120) {
+                        Text("间隔：\(recorder.intervalMinutes) 分钟")
+                    }
+                    Stepper(value: $recorder.clipSeconds, in: 1...60) {
+                        Text("片段：\(recorder.clipSeconds) 秒")
+                    }
+                    Spacer()
+                }
+                .disabled(recorder.isRunning)
+            } else {
+                HStack(spacing: 24) {
+                    VStack(alignment: .leading) {
+                        Text("走动灵敏度")
+                        Slider(value: $recorder.movementSensitivity, in: 0.015...0.10)
+                            .frame(width: 180)
+                    }
+                    Stepper(value: $recorder.inactivitySeconds, in: 3...60) {
+                        Text("无活动 \(recorder.inactivitySeconds) 秒后停止")
+                    }
+                    Label(
+                        recorder.humanDetected ? "画面中有人" : "未检测到人",
+                        systemImage: recorder.humanDetected ? "figure.stand" : "person.slash"
+                    )
+                    .foregroundColor(recorder.humanDetected ? .green : .secondary)
+                    Spacer()
+                }
+                .disabled(recorder.isRunning)
             }
 
             HStack {
@@ -90,4 +118,3 @@ struct ContentView: View {
         .onDisappear { recorder.shutdown() }
     }
 }
-
